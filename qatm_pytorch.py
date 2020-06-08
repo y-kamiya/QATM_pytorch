@@ -54,7 +54,7 @@ class ImageDataset(torch.utils.data.Dataset):
             self.image = self.transform(self.image_raw).unsqueeze(0)
         
     def __len__(self):
-        return len(self.template_names)
+        return len(self.template_path)
     
     def __getitem__(self, idx):
         template_path = str(self.template_path[idx])
@@ -137,11 +137,14 @@ class CreateModel():
         self.featex = Featex(model, use_cuda)
         self.I_feat = None
         self.I_feat_name = None
+
     def __call__(self, template, image, image_name):
         T_feat = self.featex(template)
+
         if self.I_feat_name is not image_name:
             self.I_feat = self.featex(image)
             self.I_feat_name = image_name
+
         conf_maps = None
         batchsize_T = T_feat.size()[0]
         for i in range(batchsize_T):
@@ -149,10 +152,15 @@ class CreateModel():
             I_feat_norm, T_feat_i = MyNormLayer()(self.I_feat, T_feat_i)
             dist = torch.einsum("xcab,xcde->xabde", I_feat_norm / torch.norm(I_feat_norm, dim=1, keepdim=True), T_feat_i / torch.norm(T_feat_i, dim=1, keepdim=True))
             conf_map = QATM(self.alpha)(dist)
+            print(conf_map.shape)
+            c = conf_map.numpy()
+            print(np.max(c))
+            print(np.unravel_index(np.argmax(c), c.shape))
             if conf_maps is None:
                 conf_maps = conf_map
             else:
                 conf_maps = torch.cat([conf_maps, conf_map], dim=0)
+
         return conf_maps
 
 
@@ -233,9 +241,19 @@ def plot_result(image_raw, boxes, show=False, save_name=None, color=(255, 0, 0))
 
 # ## MULTI
 
-def nms_multi(scores, w_array, h_array, thresh_list):
+def nms_multi(scores, w_array, h_array, thresh_list, template_names):
+    positions = []
+    for score in scores:
+        positions.append(np.unravel_index(np.argmax(score), score.shape))
+
     indices = np.arange(scores.shape[0])
     maxes = np.max(scores.reshape(scores.shape[0], -1), axis=1)
+
+    print('aaaaaaaaaaaaaaaaaaaaaaaa')
+    print('image shape: ' + str(scores[0].shape))
+    for i, template_name in enumerate(template_names):
+        print(maxes[i], positions[i], template_name)
+
     # omit not-matching templates
     scores_omit = scores[maxes > 0.1 * maxes.max()]
     indices_omit = indices[maxes > 0.1 * maxes.max()]
@@ -296,7 +314,7 @@ def plot_result_multi(image_raw, boxes, indices, show=False, save_name=None, col
     if show:
         plt.imshow(d_img)
     if save_name:
-        cv2.imwrite(save_name, d_img[:,:,::-1])
+        cv2.imwrite(save_name, d_img)
     return d_img
 
 
@@ -329,6 +347,7 @@ def run_multi_sample(model, dataset):
     w_array = []
     h_array = []
     thresh_list = []
+    template_names = []
     for data in dataset:
         score = run_one_sample(model, data['template'], data['image'], data['image_name'])
         if scores is None:
@@ -338,14 +357,15 @@ def run_multi_sample(model, dataset):
         w_array.append(data['template_w'])
         h_array.append(data['template_h'])
         thresh_list.append(data['thresh'])
-    return np.array(scores), np.array(w_array), np.array(h_array), thresh_list
+        template_names.append(data['template_name'])
+    return np.array(scores), np.array(w_array), np.array(h_array), thresh_list, template_names
 
 
 model = CreateModel(model=models.vgg19(pretrained=True).features, alpha=25, use_cuda=True)
 
-scores, w_array, h_array, thresh_list = run_multi_sample(model, dataset)
+scores, w_array, h_array, thresh_list, template_names = run_multi_sample(model, dataset)
 
-boxes, indices = nms_multi(scores, w_array, h_array, thresh_list)
+boxes, indices = nms_multi(scores, w_array, h_array, thresh_list, template_names)
 
 d_img = plot_result_multi(dataset.image_raw, boxes, indices, show=True, save_name='result_sample.png')
 

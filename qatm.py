@@ -43,9 +43,10 @@ if __name__ == '__main__':
     print("define model...")
     model = CreateModel(model=models.vgg19(pretrained=True).features, alpha=args.alpha, use_cuda=args.cuda)
     print("calculate score...")
-    scores, w_array, h_array, thresh_list = run_multi_sample(model, dataset)
+    scores, w_array, h_array, thresh_list, template_names = run_multi_sample(model, dataset)
+    print(scores.shape)
     print("nms...")
-    boxes, indices = nms_multi(scores, w_array, h_array, thresh_list)
+    boxes, indices = nms_multi(scores, w_array, h_array, thresh_list, template_names)
     _ = plot_result_multi(dataset.image_raw, boxes, indices, show=False, save_name='result.png')
     print("result.png was saved")
 
